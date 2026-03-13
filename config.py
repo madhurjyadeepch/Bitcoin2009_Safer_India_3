@@ -25,6 +25,7 @@ YOLO_PERSON_CLASS = 0       # COCO class ID for "person"
 # ──────────────────────────────────────────────
 # Pose Estimation (MediaPipe)
 # ──────────────────────────────────────────────
+POSE_MODEL_PATH = "pose_landmarker_lite.task"  # MediaPipe Pose Landmarker model
 POSE_MIN_DETECTION_CONFIDENCE = 0.5
 POSE_MIN_TRACKING_CONFIDENCE = 0.5
 

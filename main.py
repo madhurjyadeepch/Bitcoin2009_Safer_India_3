@@ -3,15 +3,20 @@ AI CCTV Anomaly Detection System — Main Entry Point
 
 Phase 1: Video capture + live dashboard display.
 Phase 2: YOLOv8 person detection with centroid tracking.
-Subsequent phases will add pose estimation and anomaly detectors.
+Phase 3: MediaPipe pose estimation with skeleton overlay.
+Phase 4: Fight detection using pose + motion signals.
+Subsequent phases will add fall/accident and theft detectors.
 """
 
 import cv2
 import signal
 import sys
 import time
+from datetime import datetime
 from capture import VideoCapture
 from detector import PersonDetector
+from pose_estimator import PoseEstimator
+from analyzers.fight_detector import FightDetector
 import dashboard
 import config
 
@@ -22,7 +27,7 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 
-def draw_info_overlay(frame, fps=0):
+def draw_info_overlay(frame, fps=0, alert_text=None):
     """Draw status info on the frame."""
     h, w = frame.shape[:2]
 
@@ -34,6 +39,33 @@ def draw_info_overlay(frame, fps=0):
     # Status text
     cv2.putText(frame, f"AI CCTV Monitor | {w}x{h} | {fps:.0f} FPS",
                 (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+    # Alert banner if active
+    if alert_text:
+        overlay2 = frame.copy()
+        cv2.rectangle(overlay2, (0, h - 40), (w, h), (0, 0, 200), -1)
+        cv2.addWeighted(overlay2, 0.7, frame, 0.3, 0, frame)
+        cv2.putText(frame, alert_text, (10, h - 12),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+    return frame
+
+
+def draw_fight_overlay(frame, events):
+    """Draw fight detection overlays — bounding box and label."""
+    for event in events:
+        x1, y1, x2, y2 = [int(v) for v in event["bbox"]]
+        conf = event["confidence"]
+
+        # Red bounding box around the fight area
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+
+        # Label
+        label = f"FIGHT {conf*100:.0f}%"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+        cv2.rectangle(frame, (x1, y1 - th - 12), (x1 + tw + 12, y1), (0, 0, 200), -1)
+        cv2.putText(frame, label, (x1 + 6, y1 - 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
     return frame
 
@@ -51,8 +83,10 @@ def main():
     dashboard.start_dashboard(threaded=True)
     print()
 
-    # Initialize person detector
+    # Initialize detection pipeline
     person_detector = PersonDetector()
+    pose_estimator = PoseEstimator()
+    fight_detector = FightDetector()
 
     # Start video capture
     cap = VideoCapture()
@@ -83,6 +117,8 @@ def main():
     frame_count = 0
     fps_start = time.time()
     current_fps = 0
+    active_alert_text = None
+    alert_clear_time = 0
 
     try:
         if not camera_available:
@@ -97,17 +133,46 @@ def main():
                     print("[Main] No more frames. Stopping.")
                     break
 
+                # Get current toggle states
+                toggles = dashboard.get_toggles()
+
                 # ── Phase 2: Person Detection ──
                 tracked_persons, raw_detections = person_detector.detect(frame)
                 frame = person_detector.draw_detections(frame, tracked_persons)
 
+                # ── Phase 3: Pose Estimation ──
+                poses = pose_estimator.estimate(frame, tracked_persons)
+                frame = pose_estimator.draw_poses(frame, poses)
+
+                # ── Phase 4: Fight Detection ──
+                fight_events = []
+                if toggles.get("fight", True):
+                    fight_events = fight_detector.analyze(tracked_persons, poses)
+                    if fight_events:
+                        frame = draw_fight_overlay(frame, fight_events)
+                        # Send alerts to dashboard
+                        for event in fight_events:
+                            alert_data = {
+                                "type": "fight",
+                                "confidence": event["confidence"],
+                                "timestamp": datetime.now().strftime("%H:%M:%S"),
+                                "persons": event["persons"],
+                            }
+                            dashboard.emit_alert(alert_data)
+                            active_alert_text = f"⚠ FIGHT DETECTED — Confidence: {event['confidence']*100:.0f}%"
+                            alert_clear_time = time.time() + 3  # show for 3 seconds
+
                 # ── Future phases will plug in here ──
-                # Phase 3: poses = pose_estimator.estimate(frame, tracked_persons)
-                # Phase 4-6: anomalies = analyze(poses, tracked_persons)
-                # Phase 7: alert_manager.process(anomalies, frame)
+                # Phase 5: fall_events = fall_detector.analyze(tracked_persons, poses)
+                # Phase 6: theft_events = theft_detector.analyze(tracked_persons, poses)
+                # Phase 7: alert_manager.process(all_events, frame)
+
+                # Clear alert text after timeout
+                if active_alert_text and time.time() > alert_clear_time:
+                    active_alert_text = None
 
                 # Draw overlay
-                frame = draw_info_overlay(frame, current_fps)
+                frame = draw_info_overlay(frame, current_fps, active_alert_text)
 
                 # Send frame to dashboard
                 dashboard.update_frame(frame)
@@ -125,6 +190,7 @@ def main():
     finally:
         if camera_available:
             cap.release()
+        pose_estimator.cleanup()
         print("[Main] Stopped.")
 
 
