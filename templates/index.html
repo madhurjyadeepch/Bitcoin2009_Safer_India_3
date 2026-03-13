@@ -48,6 +48,20 @@
 
             <!-- Sidebar -->
             <aside class="sidebar">
+                <!-- Camera Selection -->
+                <section class="controls-section">
+                    <div class="section-header">
+                        <h2>Camera Source</h2>
+                        <button class="btn-refresh" id="btn-refresh-cameras" title="Refresh cameras">↻</button>
+                    </div>
+                    <div class="camera-selector">
+                        <select id="camera-select" class="camera-dropdown">
+                            <option value="0" selected>Camera 0 (default)</option>
+                        </select>
+                        <div class="camera-status" id="camera-status"></div>
+                    </div>
+                </section>
+
                 <!-- Detection Controls -->
                 <section class="controls-section">
                     <div class="section-header">
@@ -116,6 +130,9 @@
         const videoFeed = document.getElementById('video-feed');
         const videoOverlay = document.getElementById('video-overlay');
         const btnClear = document.getElementById('btn-clear-alerts');
+        const cameraSelect = document.getElementById('camera-select');
+        const cameraStatus = document.getElementById('camera-status');
+        const btnRefreshCameras = document.getElementById('btn-refresh-cameras');
 
         // Track alerts
         let alertCount = 0;
@@ -124,6 +141,8 @@
         socket.on('connect', () => {
             statusDot.classList.add('connected');
             statusText.textContent = 'Live';
+            // Fetch available cameras on connect
+            loadCameras();
         });
 
         socket.on('disconnect', () => {
@@ -141,7 +160,61 @@
             videoOverlay.querySelector('span').textContent = 'Feed unavailable';
         };
 
-        // Incoming alerts
+        // ── Camera Selection ──
+        function loadCameras() {
+            cameraStatus.textContent = 'Scanning...';
+            cameraStatus.className = 'camera-status scanning';
+            fetch('/api/cameras')
+                .then(res => res.json())
+                .then(cameras => {
+                    const currentVal = cameraSelect.value;
+                    cameraSelect.innerHTML = '';
+                    if (cameras.length === 0) {
+                        cameraSelect.innerHTML = '<option value="0">No cameras found</option>';
+                        cameraStatus.textContent = 'No cameras';
+                        cameraStatus.className = 'camera-status error';
+                        return;
+                    }
+                    cameras.forEach(cam => {
+                        const opt = document.createElement('option');
+                        opt.value = cam.index;
+                        opt.textContent = `${cam.name} (${cam.resolution})`;
+                        if (String(cam.index) === String(currentVal)) opt.selected = true;
+                        cameraSelect.appendChild(opt);
+                    });
+                    cameraStatus.textContent = `${cameras.length} camera(s) found`;
+                    cameraStatus.className = 'camera-status success';
+                    setTimeout(() => { cameraStatus.textContent = ''; }, 3000);
+                })
+                .catch(() => {
+                    cameraStatus.textContent = 'Scan failed';
+                    cameraStatus.className = 'camera-status error';
+                });
+        }
+
+        cameraSelect.addEventListener('change', (e) => {
+            const source = e.target.value;
+            cameraStatus.textContent = 'Switching...';
+            cameraStatus.className = 'camera-status scanning';
+            socket.emit('switch_camera', { source: source });
+        });
+
+        btnRefreshCameras.addEventListener('click', loadCameras);
+
+        socket.on('camera_switch_result', (data) => {
+            if (data.success) {
+                cameraStatus.textContent = `Switched to Camera ${data.source}`;
+                cameraStatus.className = 'camera-status success';
+                // Reload the MJPEG stream
+                videoFeed.src = '/video_feed?' + Date.now();
+            } else {
+                cameraStatus.textContent = `Switch failed`;
+                cameraStatus.className = 'camera-status error';
+            }
+            setTimeout(() => { cameraStatus.textContent = ''; }, 3000);
+        });
+
+        // ── Incoming alerts ──
         socket.on('new_alert', (data) => {
             addAlert(data);
         });

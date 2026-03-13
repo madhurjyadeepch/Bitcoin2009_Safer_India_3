@@ -10,9 +10,9 @@
 - [x] Phase 2: Human detection (YOLOv8)
 - [x] Phase 3: Pose estimation (MediaPipe)
 - [x] Phase 4: Fight detection
-- [ ] Phase 5: Accident / fall detection
-- [ ] Phase 6: Theft detection (rapid grab & run)
-- [ ] Phase 7: Alert system (Telegram)
+- [x] Phase 5: Accident / fall detection
+- [x] Phase 6: Theft detection (rapid grab & run)
+- [x] Phase 7: Alert system (Telegram)
 - [ ] Phase 8: Web dashboard UI
 
 ## Verification

@@ -1,11 +1,12 @@
 """
-Flask + SocketIO web dashboard for live video feed and alert log.
+Flask + SocketIO web dashboard for live video feed, alert log, and camera selection.
 """
 
 import cv2
 import threading
-from flask import Flask, render_template, Response
+from flask import Flask, render_template, Response, jsonify
 from flask_socketio import SocketIO
+from capture import enumerate_cameras
 import config
 
 app = Flask(__name__)
@@ -20,6 +21,15 @@ _detection_toggles = {
     "fall": True,
     "theft": True,
 }
+
+# Camera switch callback (set by main.py)
+_camera_switch_callback = None
+
+
+def set_camera_switch_callback(callback):
+    """Register a callback for camera switching from main.py."""
+    global _camera_switch_callback
+    _camera_switch_callback = callback
 
 
 def update_frame(frame):
@@ -47,7 +57,6 @@ def generate_mjpeg():
     while True:
         frame = get_frame()
         if frame is None:
-            # Send a blank frame if no video yet
             import numpy as np
             frame = np.zeros((360, 640, 3), dtype=np.uint8)
             cv2.putText(frame, "Waiting for video...", (150, 180),
@@ -60,7 +69,6 @@ def generate_mjpeg():
         yield (b"--frame\r\n"
                b"Content-Type: image/jpeg\r\n\r\n" + buffer.tobytes() + b"\r\n")
 
-        # Small sleep to control stream rate
         import time
         time.sleep(1.0 / config.PROCESS_FPS)
 
@@ -78,6 +86,13 @@ def video_feed():
                     mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
+@app.route("/api/cameras")
+def api_cameras():
+    """Return list of available camera devices."""
+    cameras = enumerate_cameras()
+    return jsonify(cameras)
+
+
 @socketio.on("toggle_detection")
 def handle_toggle(data):
     """Handle detection toggle from the dashboard."""
@@ -87,6 +102,35 @@ def handle_toggle(data):
         _detection_toggles[detection_type] = enabled
         print(f"[Dashboard] {detection_type} detection {'enabled' if enabled else 'disabled'}")
         socketio.emit("toggle_update", {"type": detection_type, "enabled": enabled})
+
+
+@socketio.on("switch_camera")
+def handle_switch_camera(data):
+    """Handle camera switch from the dashboard."""
+    source = data.get("source")
+    if source is None:
+        return
+
+    # Convert to int if it's a camera index
+    try:
+        source = int(source)
+    except (ValueError, TypeError):
+        pass  # Keep as string (file path / RTSP URL)
+
+    print(f"[Dashboard] Camera switch requested: {source}")
+
+    if _camera_switch_callback:
+        success = _camera_switch_callback(source)
+        socketio.emit("camera_switch_result", {
+            "success": success,
+            "source": source,
+        })
+    else:
+        socketio.emit("camera_switch_result", {
+            "success": False,
+            "source": source,
+            "error": "Camera switch not available",
+        })
 
 
 def get_toggles():
