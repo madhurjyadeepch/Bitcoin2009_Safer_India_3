@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI CCTV — Anomaly Detection Dashboard</title>
+    <meta name="description" content="Real-time AI-powered CCTV anomaly detection dashboard for security monitoring">
+    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                        <circle cx="12" cy="13" r="4"/>
+                    </svg>
+                </div>
+                <h1>AI CCTV Monitor</h1>
+            </div>
+            <div class="header-right">
+                <div class="status-indicator" id="status-indicator">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Live</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Video Feed -->
+            <section class="video-section">
+                <div class="section-header">
+                    <h2>Live Feed</h2>
+                    <span class="badge" id="fps-badge">-- FPS</span>
+                </div>
+                <div class="video-container">
+                    <img src="/video_feed" alt="Live CCTV Feed" id="video-feed" />
+                    <div class="video-overlay" id="video-overlay">
+                        <span>Connecting to feed...</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <!-- Detection Controls -->
+                <section class="controls-section">
+                    <div class="section-header">
+                        <h2>Detection Controls</h2>
+                    </div>
+                    <div class="controls-grid">
+                        <div class="control-card" id="control-fight">
+                            <div class="control-info">
+                                <span class="control-icon">🥊</span>
+                                <span class="control-label">Fight Detection</span>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="toggle-fight" checked data-type="fight">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="control-card" id="control-fall">
+                            <div class="control-info">
+                                <span class="control-icon">⚠️</span>
+                                <span class="control-label">Fall Detection</span>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="toggle-fall" checked data-type="fall">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="control-card" id="control-theft">
+                            <div class="control-info">
+                                <span class="control-icon">🏃</span>
+                                <span class="control-label">Theft Detection</span>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="toggle-theft" checked data-type="theft">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Alert Log -->
+                <section class="alerts-section">
+                    <div class="section-header">
+                        <h2>Alert Log</h2>
+                        <button class="btn-clear" id="btn-clear-alerts" title="Clear alerts">✕</button>
+                    </div>
+                    <div class="alerts-list" id="alerts-list">
+                        <div class="alert-empty">
+                            <span class="alert-empty-icon">🛡️</span>
+                            <p>No anomalies detected</p>
+                            <p class="alert-empty-sub">System is monitoring...</p>
+                        </div>
+                    </div>
+                </section>
+            </aside>
+        </main>
+    </div>
+
+    <script>
+        // SocketIO connection
+        const socket = io();
+
+        // Elements
+        const alertsList = document.getElementById('alerts-list');
+        const statusDot = document.querySelector('.status-dot');
+        const statusText = document.querySelector('.status-text');
+        const videoFeed = document.getElementById('video-feed');
+        const videoOverlay = document.getElementById('video-overlay');
+        const btnClear = document.getElementById('btn-clear-alerts');
+
+        // Track alerts
+        let alertCount = 0;
+
+        // Connection status
+        socket.on('connect', () => {
+            statusDot.classList.add('connected');
+            statusText.textContent = 'Live';
+        });
+
+        socket.on('disconnect', () => {
+            statusDot.classList.remove('connected');
+            statusText.textContent = 'Disconnected';
+        });
+
+        // Video feed loaded
+        videoFeed.onload = () => {
+            videoOverlay.style.display = 'none';
+        };
+
+        videoFeed.onerror = () => {
+            videoOverlay.style.display = 'flex';
+            videoOverlay.querySelector('span').textContent = 'Feed unavailable';
+        };
+
+        // Incoming alerts
+        socket.on('new_alert', (data) => {
+            addAlert(data);
+        });
+
+        function addAlert(data) {
+            alertCount++;
+
+            // Remove empty state if present
+            const emptyState = alertsList.querySelector('.alert-empty');
+            if (emptyState) emptyState.remove();
+
+            const alertEl = document.createElement('div');
+            alertEl.className = `alert-item alert-${data.type || 'unknown'}`;
+
+            const icons = { fight: '🥊', fall: '⚠️', theft: '🏃' };
+            const icon = icons[data.type] || '🔴';
+            const time = data.timestamp || new Date().toLocaleTimeString();
+
+            alertEl.innerHTML = `
+                <div class="alert-icon">${icon}</div>
+                <div class="alert-content">
+                    <div class="alert-title">${data.type ? data.type.charAt(0).toUpperCase() + data.type.slice(1) : 'Unknown'} Detected</div>
+                    <div class="alert-meta">
+                        <span class="alert-time">${time}</span>
+                        ${data.confidence ? `<span class="alert-confidence">${Math.round(data.confidence * 100)}%</span>` : ''}
+                    </div>
+                </div>
+            `;
+
+            // Animate in
+            alertEl.style.animation = 'slideIn 0.3s ease-out';
+            alertsList.insertBefore(alertEl, alertsList.firstChild);
+
+            // Keep max 50 alerts
+            while (alertsList.children.length > 50) {
+                alertsList.removeChild(alertsList.lastChild);
+            }
+        }
+
+        // Clear alerts
+        btnClear.addEventListener('click', () => {
+            alertsList.innerHTML = `
+                <div class="alert-empty">
+                    <span class="alert-empty-icon">🛡️</span>
+                    <p>No anomalies detected</p>
+                    <p class="alert-empty-sub">System is monitoring...</p>
+                </div>
+            `;
+            alertCount = 0;
+        });
+
+        // Detection toggles
+        document.querySelectorAll('.toggle-switch input').forEach(toggle => {
+            toggle.addEventListener('change', (e) => {
+                const type = e.target.dataset.type;
+                const enabled = e.target.checked;
+                socket.emit('toggle_detection', { type, enabled });
+
+                const card = document.getElementById(`control-${type}`);
+                card.classList.toggle('disabled', !enabled);
+            });
+        });
+
+        // Toggle updates from server
+        socket.on('toggle_update', (data) => {
+            const toggle = document.getElementById(`toggle-${data.type}`);
+            if (toggle) {
+                toggle.checked = data.enabled;
+                const card = document.getElementById(`control-${data.type}`);
+                card.classList.toggle('disabled', !data.enabled);
+            }
+        });
+    </script>
+</body>
+</html>
